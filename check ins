@@ -1,0 +1,272 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Location Check-In</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <style>
+        body { 
+            font-family: Arial, sans-serif; 
+            text-align: center; 
+            padding: 20px;
+            background: #f5f5f5;
+        }
+        .container { 
+            max-width: 500px; 
+            margin: 0 auto; 
+            background: white;
+            padding: 30px;
+            border-radius: 10px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        input, textarea, button { 
+            width: 100%; 
+            padding: 12px; 
+            margin: 8px 0; 
+            box-sizing: border-box;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+        }
+        button {
+            background: #007cba;
+            color: white;
+            border: none;
+            cursor: pointer;
+            font-size: 16px;
+        }
+        button:disabled {
+            background: #cccccc;
+            cursor: not-allowed;
+        }
+        #gpsStatus { 
+            padding: 15px; 
+            border-radius: 5px; 
+            margin: 15px 0;
+            font-weight: bold;
+        }
+        .success { background-color: #d4edda; color: #155724; border: 1px solid #c3e6cb; }
+        .error { background-color: #f8d7da; color: #721c24; border: 1px solid #f5c6cb; }
+        .waiting { background-color: #fff3cd; color: #856404; border: 1px solid #ffeaa7; }
+        .location-data {
+            background: #f8f9fa;
+            padding: 15px;
+            border-radius: 5px;
+            margin: 15px 0;
+            text-align: left;
+            font-family: monospace;
+            font-size: 14px;
+        }
+        .hidden { display: none; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>📍 Store Visit Check-In</h1>
+        <p>Scan this QR code at any store location to record your visit</p>
+        
+        <!-- GPS Status -->
+        <div id="gpsStatus" class="waiting">
+            🔍 Requesting location access...
+        </div>
+
+        <!-- Location Data (Visible for verification) -->
+        <div id="locationData" class="location-data hidden">
+            <strong>Captured Location:</strong><br>
+            Latitude: <span id="displayLat">-</span><br>
+            Longitude: <span id="displayLng">-</span><br>
+            Accuracy: <span id="displayAccuracy">-</span> meters<br>
+            Time: <span id="displayTime">-</span>
+        </div>
+
+        <!-- Check-in Form -->
+        <form id="checkinForm">
+            <input type="text" id="employeeId" placeholder="Your Employee ID" required>
+            <input type="text" id="storeName" placeholder="Store Name (Optional)">
+            <textarea id="visitNotes" placeholder="Visit Notes (what you did today...)"></textarea>
+            
+            <!-- Hidden fields to store GPS data -->
+            <input type="hidden" id="latitude" name="latitude">
+            <input type="hidden" id="longitude" name="longitude">
+            <input type="hidden" id="accuracy" name="accuracy">
+            <input type="hidden" id="timestamp" name="timestamp">
+            
+            <button type="submit" id="submitBtn" disabled>
+                📍 Submit Location Check-In
+            </button>
+        </form>
+
+        <div id="errorMessage" class="error hidden"></div>
+        
+        <!-- Success Message -->
+        <div id="successMessage" class="success hidden">
+            ✅ Check-in successful! Location recorded.
+        </div>
+    </div>
+
+    <script>
+        // Get DOM elements
+        const gpsStatus = document.getElementById('gpsStatus');
+        const locationData = document.getElementById('locationData');
+        const checkinForm = document.getElementById('checkinForm');
+        const submitBtn = document.getElementById('submitBtn');
+        const errorMessage = document.getElementById('errorMessage');
+        const successMessage = document.getElementById('successMessage');
+
+        // Display elements
+        const displayLat = document.getElementById('displayLat');
+        const displayLng = document.getElementById('displayLng');
+        const displayAccuracy = document.getElementById('displayAccuracy');
+        const displayTime = document.getElementById('displayTime');
+
+        // Hidden form fields
+        const latitudeField = document.getElementById('latitude');
+        const longitudeField = document.getElementById('longitude');
+        const accuracyField = document.getElementById('accuracy');
+        const timestampField = document.getElementById('timestamp');
+
+        // Auto-get location when page loads
+        window.addEventListener('load', function() {
+            getCurrentLocation();
+        });
+
+        function getCurrentLocation() {
+            gpsStatus.textContent = "🔍 Requesting location access...";
+            gpsStatus.className = 'waiting';
+            
+            if (!navigator.geolocation) {
+                showError("Geolocation is not supported by your device/browser.");
+                return;
+            }
+
+            // High accuracy options
+            const options = {
+                enableHighAccuracy: true,  // Uses GPS if available
+                timeout: 15000,           // 15 second timeout
+                maximumAge: 0             // No cached position
+            };
+
+            navigator.geolocation.getCurrentPosition(
+                locationSuccess,
+                locationError,
+                options
+            );
+        }
+
+        function locationSuccess(position) {
+            const lat = position.coords.latitude;
+            const lng = position.coords.longitude;
+            const accuracy = position.coords.accuracy;
+            const now = new Date();
+
+            // Update display
+            displayLat.textContent = lat.toFixed(6);
+            displayLng.textContent = lng.toFixed(6);
+            displayAccuracy.textContent = Math.round(accuracy);
+            displayTime.textContent = now.toLocaleString();
+
+            // Update hidden form fields
+            latitudeField.value = lat;
+            longitudeField.value = lng;
+            accuracyField.value = accuracy;
+            timestampField.value = now.toISOString();
+
+            // Show location data and enable form
+            locationData.classList.remove('hidden');
+            gpsStatus.textContent = `✅ Location captured! (Accuracy: ${Math.round(accuracy)}m)`;
+            gpsStatus.className = 'success';
+            submitBtn.disabled = false;
+
+            // Auto-populate store name if accurate enough
+            if (accuracy < 100) { // If accuracy is better than 100 meters
+                reverseGeocode(lat, lng);
+            }
+        }
+
+        function locationError(error) {
+            let message = "Unable to get your location. ";
+            
+            switch(error.code) {
+                case error.PERMISSION_DENIED:
+                    message += "You must allow location access to check in. Please refresh and allow location permissions.";
+                    break;
+                case error.POSITION_UNAVAILABLE:
+                    message += "Location information unavailable. Check your GPS/WiFi connection.";
+                    break;
+                case error.TIMEOUT:
+                    message += "Location request timed out. Please try again.";
+                    break;
+            }
+            
+            showError(message);
+            gpsStatus.textContent = "❌ Location access failed";
+            gpsStatus.className = 'error';
+        }
+
+        function showError(msg) {
+            errorMessage.textContent = msg;
+            errorMessage.classList.remove('hidden');
+        }
+
+        function reverseGeocode(lat, lng) {
+            // Simple reverse geocoding to suggest store name
+            // Using OpenStreetMap Nominatim (free service)
+            fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lng}&zoom=18&addressdetails=1`)
+                .then(response => response.json())
+                .then(data => {
+                    if (data.display_name) {
+                        const storeNameField = document.getElementById('storeName');
+                        // Extract the most relevant part (usually the building or road)
+                        const address = data.display_name.split(',')[0];
+                        if (address && !storeNameField.value) {
+                            storeNameField.placeholder = `Suggestion: ${address}`;
+                        }
+                    }
+                })
+                .catch(error => {
+                    console.log('Geocoding failed, but location still captured');
+                });
+        }
+
+        // Handle form submission
+        checkinForm.addEventListener('submit', function(event) {
+            event.preventDefault();
+            
+            const formData = {
+                employeeId: document.getElementById('employeeId').value,
+                storeName: document.getElementById('storeName').value,
+                visitNotes: document.getElementById('visitNotes').value,
+                latitude: latitudeField.value,
+                longitude: longitudeField.value,
+                accuracy: accuracyField.value,
+                timestamp: timestampField.value,
+                userAgent: navigator.userAgent
+            };
+
+            // Here you would send the data to your server
+            console.log('Check-in Data:', formData);
+            
+            // Show success message
+            successMessage.classList.remove('hidden');
+            checkinForm.classList.add('hidden');
+            gpsStatus.classList.add('hidden');
+            
+            // In reality, you would send this to your backend:
+            // fetch('/api/checkin', {
+            //     method: 'POST',
+            //     headers: {'Content-Type': 'application/json'},
+            //     body: JSON.stringify(formData)
+            // })
+            
+            // Optional: Auto-close after 3 seconds
+            setTimeout(() => {
+                // window.close(); // Or show a "thank you" message
+            }, 3000);
+        });
+
+        // Retry location button (hidden in CSS but can be added if needed)
+        function retryLocation() {
+            errorMessage.classList.add('hidden');
+            getCurrentLocation();
+        }
+    </script>
+</body>
+</html>
